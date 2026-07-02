@@ -137,8 +137,8 @@ jobs:
         git clone ${{ github.event.inputs.COMMON_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.COMMON_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ============= 精简 recovery 镜像 =============
-    - name: Optimize recovery image size (keep MTP)
+    # ============= 精简 recovery 镜像（含语言精简，保留 MTP） =============
+    - name: Optimize recovery image size (keep MTP, only EN+ZH)
       run: |
         BOARD_FILE="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk"
         if [ -f "$BOARD_FILE" ]; then
@@ -148,21 +148,22 @@ jobs:
           sed -i '/BOARD_RAMDISK_COMPRESSOR/d' "$BOARD_FILE"
           echo "BOARD_RAMDISK_COMPRESSOR := gzip" >> "$BOARD_FILE"
 
-          # 2. 显式禁用不需要的大型组件（保留 MTP 相关）
+          # 2. 显式禁用不需要的大型组件（保留 MTP，不设置 TW_EXCLUDE_MTP）
           echo "TW_INCLUDE_BASH      := false" >> "$BOARD_FILE"
           echo "TW_INCLUDE_NANO      := false" >> "$BOARD_FILE"
           echo "TW_INCLUDE_PIGZ      := false" >> "$BOARD_FILE"
           echo "TW_INCLUDE_OPENAES   := false" >> "$BOARD_FILE"
           echo "TW_INCLUDE_TWRPAPP   := false" >> "$BOARD_FILE"
-          # 可选：如果不需要 busybox（许多工具依赖它，谨慎），可以注释掉下面一行
-          # echo "TW_INCLUDE_BUSYBOX   := false" >> "$BOARD_FILE"
-          # 加密组件（如果不使用加密备份，可禁用）
           echo "TW_INCLUDE_CRYPTO    := false" >> "$BOARD_FILE"
 
-          # 3. 使用较小分辨率的主题（如果设备支持，可节省空间）
+          # 3. 精简语言：仅保留英文和简体中文
+          echo "TW_EXTRA_LANGUAGES := false" >> "$BOARD_FILE"
+          echo "TW_DEFAULT_LANGUAGE := zh_CN" >> "$BOARD_FILE"
+
+          # 4. 可选：使用较小分辨率的主题（如果设备支持，可节省空间）
           # echo "TW_THEME := portrait_hdpi" >> "$BOARD_FILE"
 
-          # 4. 可选：如果分区大小确实允许，可以增大限制（非必须）
+          # 5. 可选：如果分区大小确实允许，可以增大限制（非必须）
           # echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 20971520" >> "$BOARD_FILE"
 
           echo "✅ Optimizations applied."
@@ -172,7 +173,7 @@ jobs:
         fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # 同时清理 device.mk 中可能引用的多余包（已有步骤，保留）
+    # 同时清理 device.mk 中可能引用的多余包
     - name: Remove unnecessary packages from device tree
       run: |
         DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
