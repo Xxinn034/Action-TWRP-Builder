@@ -137,15 +137,49 @@ jobs:
         git clone ${{ github.event.inputs.COMMON_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.COMMON_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ⭐ 增强：更彻底地移除无关包（busybox, bash, nano, pigz, openaes, twrpapp）
+    # ============= 精简 recovery 镜像 =============
+    - name: Optimize recovery image size (keep MTP)
+      run: |
+        BOARD_FILE="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk"
+        if [ -f "$BOARD_FILE" ]; then
+          echo "✅ Found BoardConfig.mk, applying optimizations..."
+
+          # 1. 改用 gzip 压缩（压缩率高于 lz4，比 xz 快）
+          sed -i '/BOARD_RAMDISK_COMPRESSOR/d' "$BOARD_FILE"
+          echo "BOARD_RAMDISK_COMPRESSOR := gzip" >> "$BOARD_FILE"
+
+          # 2. 显式禁用不需要的大型组件（保留 MTP 相关）
+          echo "TW_INCLUDE_BASH      := false" >> "$BOARD_FILE"
+          echo "TW_INCLUDE_NANO      := false" >> "$BOARD_FILE"
+          echo "TW_INCLUDE_PIGZ      := false" >> "$BOARD_FILE"
+          echo "TW_INCLUDE_OPENAES   := false" >> "$BOARD_FILE"
+          echo "TW_INCLUDE_TWRPAPP   := false" >> "$BOARD_FILE"
+          # 可选：如果不需要 busybox（许多工具依赖它，谨慎），可以注释掉下面一行
+          # echo "TW_INCLUDE_BUSYBOX   := false" >> "$BOARD_FILE"
+          # 加密组件（如果不使用加密备份，可禁用）
+          echo "TW_INCLUDE_CRYPTO    := false" >> "$BOARD_FILE"
+
+          # 3. 使用较小分辨率的主题（如果设备支持，可节省空间）
+          # echo "TW_THEME := portrait_hdpi" >> "$BOARD_FILE"
+
+          # 4. 可选：如果分区大小确实允许，可以增大限制（非必须）
+          # echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 20971520" >> "$BOARD_FILE"
+
+          echo "✅ Optimizations applied."
+        else
+          echo "⚠️ BoardConfig.mk not found, skipping optimization."
+          exit 1
+        fi
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    # 同时清理 device.mk 中可能引用的多余包（已有步骤，保留）
     - name: Remove unnecessary packages from device tree
       run: |
         DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
         if [ -d "$DEVICE_DIR" ]; then
-          for mkfile in device.mk omni.mk BoardConfig.mk; do
+          for mkfile in device.mk omni.mk; do
             if [ -f "$DEVICE_DIR/$mkfile" ]; then
               echo "Modifying $DEVICE_DIR/$mkfile"
-              # 删除所有相关行
               sed -i '/busybox/d' "$DEVICE_DIR/$mkfile"
               sed -i '/bash/d' "$DEVICE_DIR/$mkfile"
               sed -i '/nano/d' "$DEVICE_DIR/$mkfile"
@@ -153,7 +187,6 @@ jobs:
               sed -i '/openaes/d' "$DEVICE_DIR/$mkfile"
               sed -i '/twrpapp/d' "$DEVICE_DIR/$mkfile"
               sed -i '/TWRPApp/d' "$DEVICE_DIR/$mkfile"
-              # 额外删除可能引用到的包名
               sed -i '/libncurses/d' "$DEVICE_DIR/$mkfile"
               sed -i '/openssh/d' "$DEVICE_DIR/$mkfile"
             fi
@@ -161,21 +194,6 @@ jobs:
         else
           echo "Device directory $DEVICE_DIR not found"
           exit 1
-        fi
-      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-
-    # 🚀 新增：优化 recovery 镜像大小（启用 lz4 压缩 + 可选增大分区）
-    - name: Optimize recovery image size
-      run: |
-        BOARD_FILE="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk"
-        if [ -f "$BOARD_FILE" ]; then
-          echo "✅ Found BoardConfig.mk, applying optimizations..."
-          # 启用 lz4 压缩（比 gzip 压缩率更高且速度更快）
-          echo "BOARD_RAMDISK_COMPRESSOR := lz4" >> "$BOARD_FILE"
-          # 如果仍超，可以临时增大分区限制（注释掉以下行可取消）
-          # echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 20971520" >> "$BOARD_FILE"
-        else
-          echo "⚠️ BoardConfig.mk not found, skipping optimization."
         fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
