@@ -121,7 +121,6 @@ jobs:
         git clone ${{ github.event.inputs.DEVICE_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # 🔧 移除不兼容的 Android.bp 文件
     - name: Remove incompatible Android.bp
       run: |
         if [ -f ./${{ github.event.inputs.DEVICE_PATH }}/Android.bp ]; then
@@ -138,7 +137,7 @@ jobs:
         git clone ${{ github.event.inputs.COMMON_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.COMMON_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ⭐ 新增：移除设备树中硬编码的大型包（busybox, bash, nano, pigz, openaes, twrpapp）
+    # ⭐ 增强：更彻底地移除无关包（busybox, bash, nano, pigz, openaes, twrpapp）
     - name: Remove unnecessary packages from device tree
       run: |
         DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
@@ -146,6 +145,7 @@ jobs:
           for mkfile in device.mk omni.mk BoardConfig.mk; do
             if [ -f "$DEVICE_DIR/$mkfile" ]; then
               echo "Modifying $DEVICE_DIR/$mkfile"
+              # 删除所有相关行
               sed -i '/busybox/d' "$DEVICE_DIR/$mkfile"
               sed -i '/bash/d' "$DEVICE_DIR/$mkfile"
               sed -i '/nano/d' "$DEVICE_DIR/$mkfile"
@@ -153,11 +153,29 @@ jobs:
               sed -i '/openaes/d' "$DEVICE_DIR/$mkfile"
               sed -i '/twrpapp/d' "$DEVICE_DIR/$mkfile"
               sed -i '/TWRPApp/d' "$DEVICE_DIR/$mkfile"
+              # 额外删除可能引用到的包名
+              sed -i '/libncurses/d' "$DEVICE_DIR/$mkfile"
+              sed -i '/openssh/d' "$DEVICE_DIR/$mkfile"
             fi
           done
         else
           echo "Device directory $DEVICE_DIR not found"
           exit 1
+        fi
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    # 🚀 新增：优化 recovery 镜像大小（启用 lz4 压缩 + 可选增大分区）
+    - name: Optimize recovery image size
+      run: |
+        BOARD_FILE="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk"
+        if [ -f "$BOARD_FILE" ]; then
+          echo "✅ Found BoardConfig.mk, applying optimizations..."
+          # 启用 lz4 压缩（比 gzip 压缩率更高且速度更快）
+          echo "BOARD_RAMDISK_COMPRESSOR := lz4" >> "$BOARD_FILE"
+          # 如果仍超，可以临时增大分区限制（注释掉以下行可取消）
+          # echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 20971520" >> "$BOARD_FILE"
+        else
+          echo "⚠️ BoardConfig.mk not found, skipping optimization."
         fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
