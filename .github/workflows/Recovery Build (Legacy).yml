@@ -137,65 +137,79 @@ jobs:
         git clone ${{ github.event.inputs.COMMON_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.COMMON_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ============= 精简 recovery 镜像（含语言精简，保留 MTP） =============
-    - name: Optimize recovery image size (keep MTP, only EN+ZH)
+    # ========== 应用自定义：署名、语言、体积优化（不修改 fstab） ==========
+    - name: Apply TWRP customizations (signature, language, size optimization)
       run: |
+        # 1. 找到 BoardConfig.mk
         BOARD_FILE="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk"
-        if [ -f "$BOARD_FILE" ]; then
-          echo "✅ Found BoardConfig.mk, applying optimizations..."
-
-          # 1. 改用 gzip 压缩（压缩率高于 lz4，比 xz 快）
-          sed -i '/BOARD_RAMDISK_COMPRESSOR/d' "$BOARD_FILE"
-          echo "BOARD_RAMDISK_COMPRESSOR := gzip" >> "$BOARD_FILE"
-
-          # 2. 显式禁用不需要的大型组件（保留 MTP，不设置 TW_EXCLUDE_MTP）
-          echo "TW_INCLUDE_BASH      := false" >> "$BOARD_FILE"
-          echo "TW_INCLUDE_NANO      := false" >> "$BOARD_FILE"
-          echo "TW_INCLUDE_PIGZ      := false" >> "$BOARD_FILE"
-          echo "TW_INCLUDE_OPENAES   := false" >> "$BOARD_FILE"
-          echo "TW_INCLUDE_TWRPAPP   := false" >> "$BOARD_FILE"
-          echo "TW_INCLUDE_CRYPTO    := false" >> "$BOARD_FILE"
-
-          # 3. 精简语言：仅保留英文和简体中文
-          echo "TW_EXTRA_LANGUAGES := false" >> "$BOARD_FILE"
-          echo "TW_DEFAULT_LANGUAGE := zh_CN" >> "$BOARD_FILE"
-
-          # 4. 可选：使用较小分辨率的主题（如果设备支持，可节省空间）
-          # echo "TW_THEME := portrait_hdpi" >> "$BOARD_FILE"
-
-          # 5. 可选：如果分区大小确实允许，可以增大限制（非必须）
-          # echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 20971520" >> "$BOARD_FILE"
-
-          echo "✅ Optimizations applied."
-        else
-          echo "⚠️ BoardConfig.mk not found, skipping optimization."
+        if [ ! -f "$BOARD_FILE" ]; then
+          echo "❌ BoardConfig.mk not found! Exiting."
           exit 1
         fi
-      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+        echo "✅ Found BoardConfig.mk"
 
-    # 同时清理 device.mk 中可能引用的多余包
-    - name: Remove unnecessary packages from device tree
-      run: |
-        DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
-        if [ -d "$DEVICE_DIR" ]; then
-          for mkfile in device.mk omni.mk; do
-            if [ -f "$DEVICE_DIR/$mkfile" ]; then
-              echo "Modifying $DEVICE_DIR/$mkfile"
-              sed -i '/busybox/d' "$DEVICE_DIR/$mkfile"
-              sed -i '/bash/d' "$DEVICE_DIR/$mkfile"
-              sed -i '/nano/d' "$DEVICE_DIR/$mkfile"
-              sed -i '/pigz/d' "$DEVICE_DIR/$mkfile"
-              sed -i '/openaes/d' "$DEVICE_DIR/$mkfile"
-              sed -i '/twrpapp/d' "$DEVICE_DIR/$mkfile"
-              sed -i '/TWRPApp/d' "$DEVICE_DIR/$mkfile"
-              sed -i '/libncurses/d' "$DEVICE_DIR/$mkfile"
-              sed -i '/openssh/d' "$DEVICE_DIR/$mkfile"
-            fi
+        # 2. 添加署名（如果尚未存在）
+        if ! grep -q "TW_DEVICE_VERSION" "$BOARD_FILE"; then
+          echo "TW_DEVICE_VERSION := Xxinn034" >> "$BOARD_FILE"
+          echo "✅ Added TW_DEVICE_VERSION"
+        else
+          sed -i 's/^TW_DEVICE_VERSION.*/TW_DEVICE_VERSION := Xxinn034/' "$BOARD_FILE"
+          echo "✅ Updated TW_DEVICE_VERSION"
+        fi
+
+        # 3. 语言设置：开启额外语言，默认中文
+        sed -i '/TW_EXTRA_LANGUAGES/d' "$BOARD_FILE"
+        echo "TW_EXTRA_LANGUAGES := true" >> "$BOARD_FILE"
+        sed -i '/TW_DEFAULT_LANGUAGE/d' "$BOARD_FILE"
+        echo "TW_DEFAULT_LANGUAGE := zh_CN" >> "$BOARD_FILE"
+
+        # 4. 删除 TWRP 源码中除中文外的所有额外语言文件夹（在编译前）
+        LANG_DIR="${{ steps.pwd.outputs.workspace-folder }}/bootable/recovery/gui/theme/extra-languages/"
+        if [ -d "$LANG_DIR" ]; then
+          echo "Deleting non-Chinese language folders..."
+          cd "$LANG_DIR"
+          for lang in $(ls -d */ 2>/dev/null | grep -v 'zh_CN/'); do
+            echo "Removing $lang"
+            rm -rf "$lang"
           done
+          cd - >/dev/null
+          echo "✅ Language folders pruned (kept only zh_CN + built-in English)"
         else
-          echo "Device directory $DEVICE_DIR not found"
-          exit 1
+          echo "⚠️ extra-languages directory not found, skipping language pruning (may cause only English available)"
         fi
+
+        # 5. 压缩优化：改用 gzip
+        sed -i '/BOARD_RAMDISK_COMPRESSOR/d' "$BOARD_FILE"
+        echo "BOARD_RAMDISK_COMPRESSOR := gzip" >> "$BOARD_FILE"
+
+        # 6. 禁用不需要的大型组件（保留 MTP）
+        echo "TW_INCLUDE_BASH      := false" >> "$BOARD_FILE"
+        echo "TW_INCLUDE_NANO      := false" >> "$BOARD_FILE"
+        echo "TW_INCLUDE_PIGZ      := false" >> "$BOARD_FILE"
+        echo "TW_INCLUDE_OPENAES   := false" >> "$BOARD_FILE"
+        echo "TW_INCLUDE_TWRPAPP   := false" >> "$BOARD_FILE"
+        echo "TW_INCLUDE_CRYPTO    := false" >> "$BOARD_FILE"
+        # 确保 MTP 未被禁用
+        sed -i '/TW_EXCLUDE_MTP/d' "$BOARD_FILE"
+
+        # 7. 清理 device.mk 中的无关引用（辅助）
+        DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
+        for mkfile in device.mk omni.mk; do
+          if [ -f "$DEVICE_DIR/$mkfile" ]; then
+            echo "Cleaning $mkfile"
+            sed -i '/busybox/d' "$DEVICE_DIR/$mkfile"
+            sed -i '/bash/d' "$DEVICE_DIR/$mkfile"
+            sed -i '/nano/d' "$DEVICE_DIR/$mkfile"
+            sed -i '/pigz/d' "$DEVICE_DIR/$mkfile"
+            sed -i '/openaes/d' "$DEVICE_DIR/$mkfile"
+            sed -i '/twrpapp/d' "$DEVICE_DIR/$mkfile"
+            sed -i '/TWRPApp/d' "$DEVICE_DIR/$mkfile"
+            sed -i '/libncurses/d' "$DEVICE_DIR/$mkfile"
+            sed -i '/openssh/d' "$DEVICE_DIR/$mkfile"
+          fi
+        done
+
+        echo "🎉 All customizations applied successfully!"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Set Swap Space
@@ -232,5 +246,6 @@ jobs:
           Manifest: ${{ github.event.inputs.MANIFEST_BRANCH }}
           Device: ${{ github.event.inputs.DEVICE_NAME }}
           Target: ${{ github.event.inputs.BUILD_TARGET }}.img
+          Build by Xxinn034 with TWRP customizations
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
