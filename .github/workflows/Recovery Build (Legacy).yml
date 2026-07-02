@@ -137,7 +137,7 @@ jobs:
         git clone ${{ github.event.inputs.COMMON_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.COMMON_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ========== 应用自定义：署名、语言、体积优化（不修改 fstab） ==========
+    # ========== 应用自定义：署名、语言（保留 fonts/languages）、体积优化 ==========
     - name: Apply TWRP customizations (signature, language, size optimization)
       run: |
         # 1. 找到 BoardConfig.mk
@@ -163,17 +163,18 @@ jobs:
         sed -i '/TW_DEFAULT_LANGUAGE/d' "$BOARD_FILE"
         echo "TW_DEFAULT_LANGUAGE := zh_CN" >> "$BOARD_FILE"
 
-        # 4. 删除 TWRP 源码中除中文外的所有额外语言文件夹（在编译前）
+        # 4. 删除 TWRP 源码中除中文外的所有额外语言文件夹（保留 fonts/ 和 languages/ 目录）
         LANG_DIR="${{ steps.pwd.outputs.workspace-folder }}/bootable/recovery/gui/theme/extra-languages/"
         if [ -d "$LANG_DIR" ]; then
-          echo "Deleting non-Chinese language folders..."
+          echo "Deleting non-Chinese language folders (keeping fonts/ and languages/)..."
           cd "$LANG_DIR"
-          for lang in $(ls -d */ 2>/dev/null | grep -v 'zh_CN/'); do
+          # 列出所有目录，排除 fonts、languages 和 zh_CN
+          for lang in $(ls -d */ 2>/dev/null | grep -v -E '^(fonts|languages|zh_CN)/'); do
             echo "Removing $lang"
             rm -rf "$lang"
           done
           cd - >/dev/null
-          echo "✅ Language folders pruned (kept only zh_CN + built-in English)"
+          echo "✅ Language folders pruned (kept fonts/, languages/ and zh_CN only)"
         else
           echo "⚠️ extra-languages directory not found, skipping language pruning (may cause only English available)"
         fi
