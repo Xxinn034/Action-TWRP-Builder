@@ -45,7 +45,7 @@ on:
 jobs:
   build:
     if: github.event.repository.owner.id == github.event.sender.id
-    runs-on: ubuntu-22.04   # 关键：使用旧版 Ubuntu 提高兼容性
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
@@ -230,16 +230,14 @@ jobs:
         sudo ln -s /usr/bin/python2 /usr/bin/python
       continue-on-error: false
 
-    # ========== 核心修复：先构建 hosttools，再编译 recovery ==========
+    # ========== 核心修复：直接编译 recovery（无需单独 hosttools） ==========
     - name: Building recovery
       run: |
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng
         make clean
-        # 关键步骤：先构建 host 工具（单线程，避免依赖缺失）
-        make hosttools -j1
-        # 再编译目标镜像（可使用并行加速）
+        # 直接构建目标镜像，依赖会自动处理
         make ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
