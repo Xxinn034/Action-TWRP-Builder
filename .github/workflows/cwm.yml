@@ -45,7 +45,7 @@ jobs:
     - name: Cleanup
       uses: rokibhasansagar/slimhub_actions@main
 
-    - name: Install Toolchain (GCC 9 + Multilib)
+    - name: Install Toolchain (GCC 9 + Multilib) and Python 2
       run: |
         sudo apt update
         sudo apt install -y gcc-9 g++-9 gcc-9-multilib g++-9-multilib \
@@ -54,13 +54,16 @@ jobs:
           bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev \
           libsdl1.2-dev libwxgtk3.0-gtk3-dev libxml2 lzop pngcrush schedtool \
           squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static \
-          libstdc++-10-dev python3 tar git-lfs m4
+          libstdc++-10-dev python3 tar git-lfs m4 python2 python2-dev
         
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 100
         sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 100
         
         sudo ln -sf /usr/lib/i386-linux-gnu/libstdc++.so.6 /usr/lib32/libstdc++.so.6
         sudo ln -sf /usr/lib/i386-linux-gnu/libgcc_s.so.1 /usr/lib32/libgcc_s.so.1
+        
+        # 确保 python2 可用
+        sudo ln -sf /usr/bin/python2 /usr/local/bin/python2
 
     - name: Install Java 7 (required for CM-10.1)
       uses: actions/setup-java@v4
@@ -102,6 +105,7 @@ jobs:
         DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
         cd "$DEVICE_DIR"
         
+        # 创建 omni_G2.mk，继承 CM 配置，并修正属性赋值
         cat > omni_G2.mk << 'EOF'
         $(call inherit-product, device/ireadygo/G2/device.mk)
         $(call inherit-product, vendor/cm/config/common.mk)
@@ -117,6 +121,7 @@ jobs:
         EOF
         echo "Created omni_G2.mk (CM base)"
         
+        # 创建 vendorsetup.sh
         if [ ! -f vendorsetup.sh ]; then
           cat > vendorsetup.sh << 'EOF'
         add_lunch_combo omni_G2-eng
@@ -130,20 +135,8 @@ jobs:
           fi
         fi
         
-        if [ -f device.mk ]; then
-          if ! grep -q "PRODUCT_NAME" device.mk; then
-            echo "Appending product definitions to device.mk"
-            cat >> device.mk << 'EOF'
-        
-        PRODUCT_NAME := omni_G2
-        PRODUCT_DEVICE := G2
-        PRODUCT_BRAND := ireadygo
-        PRODUCT_MANUFACTURER := ireadygo
-        PRODUCT_MODEL := G2
-        EOF
-          fi
-        else
-          cat > device.mk << 'EOF'
+        # 确保 device.mk 只包含必要定义，不要多余的赋值（避免 build.prop 错误）
+        cat > device.mk << 'EOF'
         LOCAL_PATH := device/ireadygo/G2
         PRODUCT_NAME := omni_G2
         PRODUCT_DEVICE := G2
@@ -151,8 +144,7 @@ jobs:
         PRODUCT_MANUFACTURER := ireadygo
         PRODUCT_MODEL := G2
         EOF
-          echo "Created device.mk"
-        fi
+        echo "Created device.mk"
         
         ln -sf omni_G2.mk cm.mk 2>/dev/null || echo "cm.mk link already exists or failed"
 
@@ -162,7 +154,7 @@ jobs:
         rm -rf bootable/recovery
         git clone https://github.com/PhilZ-cwm6/philz_touch_cwm6 bootable/recovery -b cm-10.1
 
-    - name: Patch build system for GCC 9 and fix Python 2 scripts
+    - name: Patch build system for GCC 9, Python 2, and skip Java version check
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}
         find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=maybe-uninitialized//g' {} \;
@@ -170,6 +162,9 @@ jobs:
         find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=implicit-function-declaration//g' {} \;
         # 修复 Python 2 脚本
         sed -i '1s/python/python2/' build/tools/findleaves.py
+        # 强制跳过 Java 版本检查
+        sed -i '/check_java_version/d' build/core/main.mk
+        sed -i '/check_javac_version/d' build/core/main.mk
         echo "export CFLAGS=\"-Wno-error=implicit-function-declaration -fcommon\"" >> ~/.bashrc
         echo "export CXXFLAGS=\"-std=gnu++11 -Wno-error=unused-parameter\"" >> ~/.bashrc
 
