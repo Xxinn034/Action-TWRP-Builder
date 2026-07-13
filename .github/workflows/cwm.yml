@@ -55,7 +55,7 @@ jobs:
           libsdl1.2-dev libwxgtk3.0-gtk3-dev libxml2 lzop pngcrush schedtool \
           squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static \
           libstdc++-10-dev python3 tar git-lfs m4 python2 python2-dev \
-          libstdc++6:i386   # 添加 32 位 libstdc++ 解决 acp 运行时缺失
+          lib32stdc++6   # 安装 32 位 libstdc++ 运行时库
         
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 100
         sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 100
@@ -189,7 +189,7 @@ jobs:
         export CXXFLAGS="-std=gnu++11 -Wno-error=unused-parameter"
         export ALLOW_MISSING_DEPENDENCIES=true
         # 确保 32 位库路径被 ld 找到
-        export LD_LIBRARY_PATH=/usr/lib/i386-linux-gnu:$LD_LIBRARY_PATH
+        export LD_LIBRARY_PATH=/usr/lib32:$LD_LIBRARY_PATH
         
         source build/envsetup.sh
         lunch ${{ github.event.inputs.MAKEFILE_NAME }} || {
