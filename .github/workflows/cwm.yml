@@ -55,12 +55,14 @@ jobs:
           libsdl1.2-dev libwxgtk3.0-gtk3-dev libxml2 lzop pngcrush schedtool \
           squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static \
           libstdc++-10-dev python3 tar git-lfs m4 python2 python2-dev \
-          lib32stdc++6   # 安装 32 位 libstdc++ 运行时库
+          lib32stdc++6
+        # === 新增：显式安装 32 位 libgcc 和 libstdc++ ===
+        sudo apt install -y libgcc-s1:i386 libstdc++6:i386
         
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 100
         sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 100
         
-        # 确保 32 位库路径存在并正确链接
+        # 确保 32 位库路径存在并正确链接（现在指向实际存在的文件）
         sudo mkdir -p /usr/lib32
         sudo ln -sf /usr/lib/i386-linux-gnu/libstdc++.so.6 /usr/lib32/libstdc++.so.6
         sudo ln -sf /usr/lib/i386-linux-gnu/libgcc_s.so.1 /usr/lib32/libgcc_s.so.1
@@ -157,13 +159,16 @@ jobs:
         rm -rf bootable/recovery
         git clone https://github.com/PhilZ-cwm6/philz_touch_cwm6 bootable/recovery -b cm-10.1
 
-    # 修正 parser.hpp 缺失：让 bison 直接生成 parser.hpp
+    # === 修正：强制让 bison 生成 parser.hpp ===
     - name: Fix parser.hpp generation
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}/bootable/recovery/edify
-        # 修改 Android.mk，让 bison 生成 parser.hpp
-        sed -i 's/LOCAL_YACCFLAGS := -d/LOCAL_YACCFLAGS := -d --defines=parser.hpp/' Android.mk
-        echo "Patched edify/Android.mk to generate parser.hpp"
+        # 删除可能存在的旧定义，然后在 LOCAL_PATH 后插入新定义
+        sed -i '/^LOCAL_YACCFLAGS/d' Android.mk
+        sed -i '/^LOCAL_PATH/a LOCAL_YACCFLAGS := -d --defines=parser.hpp' Android.mk
+        echo "Patched edify/Android.mk: added LOCAL_YACCFLAGS"
+        # 调试：显示修改后的行
+        grep LOCAL_YACCFLAGS Android.mk || echo "Warning: LOCAL_YACCFLAGS not found (maybe already defined?)"
 
     - name: Patch build system for GCC 9, Python 2, and skip Java version check
       run: |
@@ -191,7 +196,7 @@ jobs:
         export CFLAGS="-Wno-error=implicit-function-declaration -fcommon"
         export CXXFLAGS="-std=gnu++11 -Wno-error=unused-parameter"
         export ALLOW_MISSING_DEPENDENCIES=true
-        # 确保 32 位库路径被 ld 找到（如果之前 ldconfig 未生效，这里再次设置）
+        # 确保 32 位库路径被 ld 找到
         export LD_LIBRARY_PATH=/usr/lib32:$LD_LIBRARY_PATH
         
         source build/envsetup.sh
