@@ -236,15 +236,22 @@ jobs:
     # ========== 构建 recovery（增加兼容性修复） ==========
     - name: Building recovery
       run: |
+        # 进入源码根目录
+        cd ${{ steps.pwd.outputs.workspace-folder }}
+        
+        # 修补 checkpolicy 头文件，解决全局变量多重定义
+        sed -i 's/^int te_assertions;/extern int te_assertions;/' external/checkpolicy/checkpolicy.h
+        # 在 checkpolicy.c 中添加该变量的定义（如果尚未定义）
+        if ! grep -q "int te_assertions" external/checkpolicy/checkpolicy.c; then
+          echo "int te_assertions = 0;" >> external/checkpolicy/checkpolicy.c
+        fi
+        
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
-        export HOST_GLOBAL_CFLAGS="-fcommon"   # 修复 -fno-common 导致的全局变量多重定义
+        export HOST_GLOBAL_CFLAGS="-fcommon"   # 作为后备，仍然保留
         lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng
         make clean
-        # 先单独编译 host 工具，避免并行依赖缺失
-        make checkpolicy -j1 || true
-        make -C external/libselinux -j1 || true
-        # 然后全速构建目标镜像
+        # 直接全速构建目标镜像
         make ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
