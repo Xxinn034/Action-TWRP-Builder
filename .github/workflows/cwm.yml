@@ -162,20 +162,20 @@ jobs:
         rm -rf bootable/recovery
         git clone https://github.com/PhilZ-cwm6/philz_touch_cwm6 bootable/recovery -b cm-10.1
 
-    # ---- 关键修复：调整 parser.y 和头文件引用 ----
+    # ---- 关键修复：直接生成 parser.h ----
     - name: Fix parser.hpp generation
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}/bootable/recovery/edify
         # 删除已有的 %defines 行
         sed -i '/^%defines/d' parser.y
-        # 插入不带参数的 %defines，Bison 会生成 parser.tab.h
-        sed -i '1i%defines' parser.y
+        # 插入 %defines "parser.h"，让 Bison 直接生成 parser.h
+        sed -i '1i%defines "parser.h"' parser.y
         # 将所有 #include "parser.hpp" 替换为 #include "parser.h"
         find . -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.l" -o -name "*.h" \) \
           -exec sed -i 's/#include "parser.hpp"/#include "parser.h"/g' {} \;
         # 删除 Android.mk 中可能冲突的 LOCAL_YACCFLAGS
         sed -i '/^LOCAL_YACCFLAGS/d' Android.mk
-        echo "Patched parser.y to generate parser.h and fixed includes"
+        echo "Patched parser.y to generate parser.h directly"
 
     - name: Patch build system for GCC 9, Python 2, and skip Java version check
       run: |
