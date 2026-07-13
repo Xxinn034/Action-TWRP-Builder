@@ -62,11 +62,11 @@ jobs:
         sudo ln -sf /usr/lib/i386-linux-gnu/libstdc++.so.6 /usr/lib32/libstdc++.so.6
         sudo ln -sf /usr/lib/i386-linux-gnu/libgcc_s.so.1 /usr/lib32/libgcc_s.so.1
 
-    - name: Install OpenJDK 8
+    - name: Install Java 7 (required for CM-10.1)
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
-        java-version: '8'
+        java-version: '7'
 
     - name: Install repo
       run: |
@@ -97,13 +97,11 @@ jobs:
           ./${{ github.event.inputs.DEVICE_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ========== 修正设备树修补步骤，使用 CM 通用配置 ==========
     - name: Patch device tree for Omni/CM support
       run: |
         DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
         cd "$DEVICE_DIR"
         
-        # 创建 omni_G2.mk，继承 CM 的通用配置（而不是 Omni）
         cat > omni_G2.mk << 'EOF'
         $(call inherit-product, device/ireadygo/G2/device.mk)
         $(call inherit-product, vendor/cm/config/common.mk)
@@ -119,7 +117,6 @@ jobs:
         EOF
         echo "Created omni_G2.mk (CM base)"
         
-        # 创建 vendorsetup.sh（如果不存在）
         if [ ! -f vendorsetup.sh ]; then
           cat > vendorsetup.sh << 'EOF'
         add_lunch_combo omni_G2-eng
@@ -127,14 +124,12 @@ jobs:
         EOF
           echo "Created vendorsetup.sh"
         else
-          # 确保包含 omni_G2-eng
           if ! grep -q "omni_G2" vendorsetup.sh; then
             echo "add_lunch_combo omni_G2-eng" >> vendorsetup.sh
             echo "add_lunch_combo omni_G2-userdebug" >> vendorsetup.sh
           fi
         fi
         
-        # 确保 device.mk 包含必要定义（如果缺失则添加）
         if [ -f device.mk ]; then
           if ! grep -q "PRODUCT_NAME" device.mk; then
             echo "Appending product definitions to device.mk"
@@ -159,7 +154,6 @@ jobs:
           echo "Created device.mk"
         fi
         
-        # 创建软链接 cm.mk -> omni_G2.mk（以备使用 cm_G2-eng）
         ln -sf omni_G2.mk cm.mk 2>/dev/null || echo "cm.mk link already exists or failed"
 
     - name: Replace Recovery Source with PhilZ Touch
@@ -168,12 +162,14 @@ jobs:
         rm -rf bootable/recovery
         git clone https://github.com/PhilZ-cwm6/philz_touch_cwm6 bootable/recovery -b cm-10.1
 
-    - name: Patch build system for GCC 9
+    - name: Patch build system for GCC 9 and fix Python 2 scripts
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}
         find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=maybe-uninitialized//g' {} \;
         find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=unused-parameter//g' {} \;
         find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=implicit-function-declaration//g' {} \;
+        # 修复 Python 2 脚本
+        sed -i '1s/python/python2/' build/tools/findleaves.py
         echo "export CFLAGS=\"-Wno-error=implicit-function-declaration -fcommon\"" >> ~/.bashrc
         echo "export CXXFLAGS=\"-std=gnu++11 -Wno-error=unused-parameter\"" >> ~/.bashrc
 
@@ -233,7 +229,7 @@ jobs:
           Branch: ${{ github.event.inputs.MANIFEST_BRANCH }}
           Device: ${{ github.event.inputs.DEVICE_NAME }}
           Recovery: PhilZ Touch / CWM
-          Built on Ubuntu 22.04 with GCC 9
+          Built on Ubuntu 22.04 with GCC 9 & Java 7
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
