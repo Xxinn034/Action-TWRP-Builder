@@ -239,12 +239,15 @@ jobs:
         # 进入源码根目录
         cd ${{ steps.pwd.outputs.workspace-folder }}
         
-        # 修补 checkpolicy 头文件，解决全局变量多重定义
-        sed -i 's/^int te_assertions;/extern int te_assertions;/' external/checkpolicy/checkpolicy.h
-        # 在 checkpolicy.c 中添加该变量的定义（如果尚未定义）
-        if ! grep -q "int te_assertions" external/checkpolicy/checkpolicy.c; then
-          echo "int te_assertions = 0;" >> external/checkpolicy/checkpolicy.c
+        # ===== 修正 checkpolicy 类型冲突 =====
+        # 1. 将头文件中的声明改为 extern
+        sed -i 's/^te_assert_t \*te_assertions;/extern te_assert_t *te_assertions;/' external/checkpolicy/checkpolicy.h
+        # 2. 在 checkpolicy.c 中定义该全局指针（如果尚未定义）
+        if ! grep -q "te_assert_t \*te_assertions" external/checkpolicy/checkpolicy.c; then
+          echo "te_assert_t *te_assertions = NULL;" >> external/checkpolicy/checkpolicy.c
         fi
+        # 3. 移除之前可能误添加的 int 定义（如果有）
+        sed -i '/^int te_assertions = 0;/d' external/checkpolicy/checkpolicy.c
         
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
