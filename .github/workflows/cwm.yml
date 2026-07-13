@@ -66,12 +66,10 @@ jobs:
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 100
         sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 100
         
-        # 确保 32 位库路径存在并正确链接（现在指向实际存在的文件）
         sudo mkdir -p /usr/lib32
         sudo ln -sf /usr/lib/i386-linux-gnu/libstdc++.so.6 /usr/lib32/libstdc++.so.6
         sudo ln -sf /usr/lib/i386-linux-gnu/libgcc_s.so.1 /usr/lib32/libgcc_s.so.1
         
-        # 将 /usr/lib32 加入动态链接器搜索路径
         echo "/usr/lib32" | sudo tee /etc/ld.so.conf.d/99-lib32.conf
         sudo ldconfig
         
@@ -117,6 +115,7 @@ jobs:
         DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
         cd "$DEVICE_DIR"
         
+        # 修改 omni_G2.mk，分离 PRODUCT_BUILD_PROP_OVERRIDES 和 PRODUCT_PROPERTY_OVERRIDES
         cat > omni_G2.mk << 'EOF'
         $(call inherit-product, device/ireadygo/G2/device.mk)
         $(call inherit-product, vendor/cm/config/common.mk)
@@ -125,8 +124,8 @@ jobs:
         PRODUCT_BRAND := ireadygo
         PRODUCT_MANUFACTURER := ireadygo
         PRODUCT_MODEL := G2
-        PRODUCT_BUILD_PROP_OVERRIDES += \
-            BUILD_DISPLAY_ID=CM-10.1 \
+        PRODUCT_BUILD_PROP_OVERRIDES := BUILD_DISPLAY_ID=CM-10.1
+        PRODUCT_PROPERTY_OVERRIDES += \
             ro.product.name=omni_G2 \
             ro.product.device=G2
         EOF
@@ -163,14 +162,16 @@ jobs:
         rm -rf bootable/recovery
         git clone https://github.com/PhilZ-cwm6/philz_touch_cwm6 bootable/recovery -b cm-10.1
 
+    # 修改 parser.y 强制生成 parser.hpp
     - name: Fix parser.hpp generation
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}/bootable/recovery/edify
-        # 删除可能存在的旧定义，然后在 LOCAL_PATH 后插入新定义
+        # 在 parser.y 开头插入 %defines parser.hpp
+        sed -i '/^%defines/d' parser.y
+        sed -i '1i%defines parser.hpp' parser.y
+        # 删除 Android.mk 中可能冲突的 LOCAL_YACCFLAGS
         sed -i '/^LOCAL_YACCFLAGS/d' Android.mk
-        sed -i '/^LOCAL_PATH/a LOCAL_YACCFLAGS := -d --defines=parser.hpp' Android.mk
-        echo "Patched edify/Android.mk: added LOCAL_YACCFLAGS"
-        grep LOCAL_YACCFLAGS Android.mk || echo "Warning: LOCAL_YACCFLAGS not found"
+        echo "Patched parser.y to generate parser.hpp"
 
     - name: Patch build system for GCC 9, Python 2, and skip Java version check
       run: |
