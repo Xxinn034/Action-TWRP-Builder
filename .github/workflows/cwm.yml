@@ -28,9 +28,9 @@ on:
         required: true
         default: 'G2'
       MAKEFILE_NAME:
-        description: '编译目标 (如: cm_G2-eng)'
+        description: '编译目标 (设备树修补后支持 omni_G2-eng)'
         required: true
-        default: 'cm_G2-eng'
+        default: 'omni_G2-eng'
 
 jobs:
   build:
@@ -56,11 +56,9 @@ jobs:
           squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static \
           libstdc++-10-dev python3 tar git-lfs m4
         
-        # 将 gcc-9 设为默认
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 100
         sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 100
         
-        # 确保 32 位库链接正确
         sudo ln -sf /usr/lib/i386-linux-gnu/libstdc++.so.6 /usr/lib32/libstdc++.so.6
         sudo ln -sf /usr/lib/i386-linux-gnu/libgcc_s.so.1 /usr/lib32/libgcc_s.so.1
 
@@ -99,6 +97,68 @@ jobs:
           ./${{ github.event.inputs.DEVICE_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
+    # ========== 自动修补设备树，使其兼容 CM/Omni ==========
+    - name: Patch device tree for Omni/CM support
+      run: |
+        DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
+        cd "$DEVICE_DIR"
+        
+        # 创建 omni_G2.mk（如果不存在）
+        if [ ! -f omni_G2.mk ]; then
+          cat > omni_G2.mk << 'EOF'
+        $(call inherit-product, device/ireadygo/G2/device.mk)
+        $(call inherit-product, vendor/omni/config/common.mk)
+        PRODUCT_NAME := omni_G2
+        PRODUCT_DEVICE := G2
+        PRODUCT_BRAND := ireadygo
+        PRODUCT_MANUFACTURER := ireadygo
+        PRODUCT_MODEL := G2
+        PRODUCT_BUILD_PROP_OVERRIDES += \
+            BUILD_DISPLAY_ID=CM-10.1 \
+            ro.product.name=omni_G2 \
+            ro.product.device=G2
+        EOF
+          echo "Created omni_G2.mk"
+        fi
+        
+        # 创建 vendorsetup.sh（如果不存在）
+        if [ ! -f vendorsetup.sh ]; then
+          cat > vendorsetup.sh << 'EOF'
+        add_lunch_combo omni_G2-eng
+        add_lunch_combo omni_G2-userdebug
+        EOF
+          echo "Created vendorsetup.sh"
+        fi
+        
+        # 确保 device.mk 至少包含基础内容（如果过于简单则补充）
+        if [ -f device.mk ]; then
+          if ! grep -q "PRODUCT_NAME" device.mk; then
+            echo "Appending product definitions to device.mk"
+            cat >> device.mk << 'EOF'
+        
+        PRODUCT_NAME := omni_G2
+        PRODUCT_DEVICE := G2
+        PRODUCT_BRAND := ireadygo
+        PRODUCT_MANUFACTURER := ireadygo
+        PRODUCT_MODEL := G2
+        EOF
+          fi
+        else
+          # 如果 device.mk 不存在，创建它
+          cat > device.mk << 'EOF'
+        LOCAL_PATH := device/ireadygo/G2
+        PRODUCT_NAME := omni_G2
+        PRODUCT_DEVICE := G2
+        PRODUCT_BRAND := ireadygo
+        PRODUCT_MANUFACTURER := ireadygo
+        PRODUCT_MODEL := G2
+        EOF
+          echo "Created device.mk"
+        fi
+        
+        # 创建软链接 cm.mk -> omni_G2.mk（以防需要）
+        ln -sf omni_G2.mk cm.mk 2>/dev/null || echo "cm.mk link already exists or failed"
+
     - name: Replace Recovery Source with PhilZ Touch
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}
@@ -108,11 +168,9 @@ jobs:
     - name: Patch build system for GCC 9
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}
-        # 移除可能引发错误的 -Werror 标志（特别是 -Wmaybe-uninitialized 和 -Wunused-parameter）
         find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=maybe-uninitialized//g' {} \;
         find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=unused-parameter//g' {} \;
         find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=implicit-function-declaration//g' {} \;
-        # 允许使用旧版 C++ 标准
         echo "export CFLAGS=\"-Wno-error=implicit-function-declaration -fcommon\"" >> ~/.bashrc
         echo "export CXXFLAGS=\"-std=gnu++11 -Wno-error=unused-parameter\"" >> ~/.bashrc
 
@@ -127,13 +185,16 @@ jobs:
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}
         
-        # 设置兼容性环境变量
         export CFLAGS="-Wno-error=implicit-function-declaration -fcommon"
         export CXXFLAGS="-std=gnu++11 -Wno-error=unused-parameter"
         export ALLOW_MISSING_DEPENDENCIES=true
         
         source build/envsetup.sh
-        lunch ${{ github.event.inputs.MAKEFILE_NAME }}
+        lunch ${{ github.event.inputs.MAKEFILE_NAME }} || {
+          echo "❌ lunch failed. Available products:"
+          grep "add_lunch_combo" device/*/*/vendorsetup.sh 2>/dev/null || echo "No vendorsetup found"
+          exit 1
+        }
         
         make clean
         make recoveryimage V=1 -k -j$(nproc --all) 2>&1 | tee build.log
@@ -149,9 +210,13 @@ jobs:
       run: |
         echo "========== Build failed, printing error excerpts =========="
         cd ${{ steps.pwd.outputs.workspace-folder }}
-        grep -i "error:" build.log | head -n 20 || echo "No error lines found."
-        echo "========== Last 50 lines of build.log =========="
-        tail -n 50 build.log
+        if [ -f build.log ]; then
+          grep -i "error:" build.log | head -n 20 || echo "No error lines found."
+          echo "========== Last 50 lines of build.log =========="
+          tail -n 50 build.log
+        else
+          echo "build.log not found (likely lunch failed)"
+        fi
 
     - name: Upload to Release
       if: steps.build.outputs.build_status == 'success'
