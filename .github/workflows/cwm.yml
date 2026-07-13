@@ -162,13 +162,14 @@ jobs:
         rm -rf bootable/recovery
         git clone https://github.com/PhilZ-cwm6/philz_touch_cwm6 bootable/recovery -b cm-10.1
 
-    # 修改 parser.y 强制生成 parser.hpp
+    # ---- 关键修复：parser.y 中的 %defines 必须加双引号 ----
     - name: Fix parser.hpp generation
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}/bootable/recovery/edify
-        # 在 parser.y 开头插入 %defines parser.hpp
+        # 删除已有的 %defines 行
         sed -i '/^%defines/d' parser.y
-        sed -i '1i%defines parser.hpp' parser.y
+        # 在文件开头插入 %defines "parser.hpp"（注意引号是必须的）
+        sed -i '1i%defines "parser.hpp"' parser.y
         # 删除 Android.mk 中可能冲突的 LOCAL_YACCFLAGS
         sed -i '/^LOCAL_YACCFLAGS/d' Android.mk
         echo "Patched parser.y to generate parser.hpp"
