@@ -239,6 +239,9 @@ jobs:
         # 进入源码根目录
         cd ${{ steps.pwd.outputs.workspace-folder }}
         
+        # 跳过宿主 SELinux 工具编译（避免 libselinux 链接 pcre 时路径错误）
+        export BUILD_HOST_SEPOLICY=false
+        
         # ===== 修正 checkpolicy 类型冲突 =====
         # 1. 将头文件中的声明改为 extern
         sed -i 's/^te_assert_t \*te_assertions;/extern te_assert_t *te_assertions;/' external/checkpolicy/checkpolicy.h
