@@ -54,7 +54,8 @@ jobs:
           bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev \
           libsdl1.2-dev libwxgtk3.0-gtk3-dev libxml2 lzop pngcrush schedtool \
           squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static \
-          libstdc++-10-dev python3 tar git-lfs m4 python2 python2-dev
+          libstdc++-10-dev python3 tar git-lfs m4 python2 python2-dev \
+          libstdc++6:i386   # 添加 32 位 libstdc++ 解决 acp 运行时缺失
         
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 100
         sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 100
@@ -62,7 +63,6 @@ jobs:
         sudo ln -sf /usr/lib/i386-linux-gnu/libstdc++.so.6 /usr/lib32/libstdc++.so.6
         sudo ln -sf /usr/lib/i386-linux-gnu/libgcc_s.so.1 /usr/lib32/libgcc_s.so.1
         
-        # 确保 python2 可用
         sudo ln -sf /usr/bin/python2 /usr/local/bin/python2
 
     - name: Install Java 7 (required for CM-10.1)
@@ -105,7 +105,6 @@ jobs:
         DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
         cd "$DEVICE_DIR"
         
-        # 创建 omni_G2.mk，继承 CM 配置，并修正属性赋值
         cat > omni_G2.mk << 'EOF'
         $(call inherit-product, device/ireadygo/G2/device.mk)
         $(call inherit-product, vendor/cm/config/common.mk)
@@ -121,7 +120,6 @@ jobs:
         EOF
         echo "Created omni_G2.mk (CM base)"
         
-        # 创建 vendorsetup.sh
         if [ ! -f vendorsetup.sh ]; then
           cat > vendorsetup.sh << 'EOF'
         add_lunch_combo omni_G2-eng
@@ -135,7 +133,6 @@ jobs:
           fi
         fi
         
-        # 确保 device.mk 只包含必要定义，不要多余的赋值（避免 build.prop 错误）
         cat > device.mk << 'EOF'
         LOCAL_PATH := device/ireadygo/G2
         PRODUCT_NAME := omni_G2
@@ -154,15 +151,24 @@ jobs:
         rm -rf bootable/recovery
         git clone https://github.com/PhilZ-cwm6/philz_touch_cwm6 bootable/recovery -b cm-10.1
 
+    # 新增：修复 parser.hpp 缺失
+    - name: Fix parser.hpp missing
+      run: |
+        cd ${{ steps.pwd.outputs.workspace-folder }}/bootable/recovery/edify
+        # 如果 parser.h 存在但没有 parser.hpp，创建软链接
+        if [ -f parser.h ] && [ ! -f parser.hpp ]; then
+          ln -sf parser.h parser.hpp
+        fi
+        # 如果软链接无效，也可以直接修改 parser.cpp 中的 include（备用方案）
+        # sed -i 's/#include "parser.hpp"/#include "parser.h"/' parser.cpp
+
     - name: Patch build system for GCC 9, Python 2, and skip Java version check
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}
         find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=maybe-uninitialized//g' {} \;
         find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=unused-parameter//g' {} \;
         find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=implicit-function-declaration//g' {} \;
-        # 修复 Python 2 脚本
         sed -i '1s/python/python2/' build/tools/findleaves.py
-        # 强制跳过 Java 版本检查
         sed -i '/check_java_version/d' build/core/main.mk
         sed -i '/check_javac_version/d' build/core/main.mk
         echo "export CFLAGS=\"-Wno-error=implicit-function-declaration -fcommon\"" >> ~/.bashrc
@@ -182,6 +188,8 @@ jobs:
         export CFLAGS="-Wno-error=implicit-function-declaration -fcommon"
         export CXXFLAGS="-std=gnu++11 -Wno-error=unused-parameter"
         export ALLOW_MISSING_DEPENDENCIES=true
+        # 确保 32 位库路径被 ld 找到
+        export LD_LIBRARY_PATH=/usr/lib/i386-linux-gnu:$LD_LIBRARY_PATH
         
         source build/envsetup.sh
         lunch ${{ github.event.inputs.MAKEFILE_NAME }} || {
