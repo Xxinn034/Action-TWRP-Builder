@@ -1,4 +1,4 @@
-name: Build CWM/PhilZ Recovery (Legacy)
+name: Build CWM/PhilZ Recovery (Ubuntu 22.04)
 
 on:
   workflow_dispatch:
@@ -34,7 +34,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-18.04  # 编译 Android 4.x 必须使用 Ubuntu 18.04
+    runs-on: ubuntu-22.04   # 使用 22.04，更快调度
     permissions:
       contents: write
 
@@ -45,17 +45,24 @@ jobs:
     - name: Cleanup
       uses: rokibhasansagar/slimhub_actions@main
 
-    - name: Prepare Environment
+    - name: Install Legacy Toolchain
       run: |
-        sudo apt update && sudo apt upgrade -y
-        DEBIAN_FRONTEND=noninteractive sudo apt install -yq \
-          gperf gcc-multilib g++-multilib libc6-dev lib32ncurses5-dev \
-          x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev \
-          libxml2-utils xsltproc bc ccache lib32readline-dev lib32z1-dev \
-          liblz4-tool libncurses5-dev libsdl1.2-dev libwxgtk3.0-gtk3-dev \
-          libxml2 lzop pngcrush schedtool squashfs-tools imagemagick \
-          libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev \
-          python3 tar git-lfs m4
+        sudo apt update
+        sudo apt install -y gcc-4.8 g++-4.8 gcc-4.8-multilib g++-4.8-multilib \
+          gperf g++-multilib libc6-dev lib32ncurses5-dev x11proto-core-dev \
+          libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc \
+          bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev \
+          libsdl1.2-dev libwxgtk3.0-gtk3-dev libxml2 lzop pngcrush schedtool \
+          squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static \
+          libstdc++-10-dev python3 tar git-lfs m4
+        
+        # 将 gcc-4.8 设为默认编译器
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-4.8 100
+        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-4.8 100
+        
+        # 确保 32 位库链接正确
+        sudo ln -sf /usr/lib/i386-linux-gnu/libstdc++.so.6 /usr/lib32/libstdc++.so.6
+        sudo ln -sf /usr/lib/i386-linux-gnu/libgcc_s.so.1 /usr/lib32/libgcc_s.so.1
 
     - name: Install OpenJDK 8
       uses: actions/setup-java@v4
@@ -95,10 +102,20 @@ jobs:
     - name: Replace Recovery Source with PhilZ Touch
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}
-        # 删除原有的 CWM 源码
         rm -rf bootable/recovery
-        # 克隆 PhilZ Touch 源码到正确位置[reference:5]
         git clone https://github.com/PhilZ-cwm6/philz_touch_cwm6 bootable/recovery -b cm-10.1
+
+    - name: Patch build system for GCC 4.8
+      run: |
+        cd ${{ steps.pwd.outputs.workspace-folder }}
+        # 修复一些过时的编译标志
+        find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=maybe-uninitialized//g' {} \;
+        find build/ -type f -name "*.mk" -exec sed -i 's/-Werror=unused-parameter//g' {} \;
+        # 允许使用旧版 C++ 标准
+        export CFLAGS="-Wno-error=implicit-function-declaration"
+        export CXXFLAGS="-std=gnu++11"
+        echo "export CFLAGS=\"-Wno-error=implicit-function-declaration\"" >> ~/.bashrc
+        echo "export CXXFLAGS=\"-std=gnu++11\"" >> ~/.bashrc
 
     - name: Set Swap Space
       uses: pierotofy/set-swap-space@master
@@ -111,15 +128,17 @@ jobs:
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}
         
-        # 加载构建环境
+        # 设置额外的环境变量，解决 GCC 4.8 的兼容性问题
+        export CFLAGS="-Wno-error=implicit-function-declaration"
+        export CXXFLAGS="-std=gnu++11"
+        export ALLOW_MISSING_DEPENDENCIES=true
+        
         source build/envsetup.sh
         lunch ${{ github.event.inputs.MAKEFILE_NAME }}
         
-        # 清理并编译 recovery 镜像
         make clean
         make recoveryimage V=1 -k -j$(nproc --all) 2>&1 | tee build.log
         
-        # 保存构建状态
         if [ ${PIPESTATUS[0]} -eq 0 ]; then
           echo "build_status=success" >> $GITHUB_OUTPUT
         else
@@ -147,6 +166,7 @@ jobs:
           Branch: ${{ github.event.inputs.MANIFEST_BRANCH }}
           Device: ${{ github.event.inputs.DEVICE_NAME }}
           Recovery: PhilZ Touch / CWM
+          Built on Ubuntu 22.04 with legacy toolchain
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
