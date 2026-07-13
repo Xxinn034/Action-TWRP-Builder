@@ -233,14 +233,18 @@ jobs:
         sudo ln -s /usr/bin/python2 /usr/bin/python
       continue-on-error: false
 
-    # ========== 直接构建 recovery（无需 hosttools） ==========
+    # ========== 构建 recovery（增加兼容性修复） ==========
     - name: Building recovery
       run: |
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
+        export HOST_GLOBAL_CFLAGS="-fcommon"   # 修复 -fno-common 导致的全局变量多重定义
         lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng
         make clean
-        # 直接构建 recovery，依赖自动处理
+        # 先单独编译 host 工具，避免并行依赖缺失
+        make checkpolicy -j1 || true
+        make -C external/libselinux -j1 || true
+        # 然后全速构建目标镜像
         make ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
