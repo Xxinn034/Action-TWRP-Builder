@@ -116,7 +116,7 @@ jobs:
         repo sync -j$(nproc --all) --force-sync
       working-directory: workspace
 
-    # ========== 修复 checkpolicy 多重定义（修正版） ==========
+    # ========== 修复 checkpolicy 多重定义 ==========
     - name: Fix checkpolicy multiple definition
       run: |
         set -e
@@ -143,6 +143,22 @@ jobs:
         fi
 
         echo "🎉 checkpolicy source fix applied"
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    # ========== 修复 libselinux 静态库依赖 ==========
+    - name: Fix libselinux static libs (remove whole pcre)
+      run: |
+        MK="external/libselinux/Android.mk"
+        if [ -f "$MK" ]; then
+          # 删除包含 LOCAL_WHOLE_STATIC_LIBRARIES 的行
+          sed -i '/LOCAL_WHOLE_STATIC_LIBRARIES/d' "$MK"
+          # 添加 LOCAL_STATIC_LIBRARIES := libpcre（如果原来有则覆盖）
+          sed -i '/LOCAL_STATIC_LIBRARIES/d' "$MK"
+          echo "LOCAL_STATIC_LIBRARIES := libpcre" >> "$MK"
+          echo "✅ Fixed libselinux Android.mk: changed WHOLE to STATIC for libpcre"
+        else
+          echo "⚠️  libselinux Android.mk not found"
+        fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
     # ====================================================
 
