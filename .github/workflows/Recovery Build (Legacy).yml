@@ -116,6 +116,33 @@ jobs:
         repo sync -j$(nproc --all) --force-sync
       working-directory: workspace
 
+    # ========== 新增：修复 checkpolicy 多重定义错误 ==========
+    - name: Fix checkpolicy multiple definition
+      run: |
+        set -e
+        CHECKPOLICY_H="external/checkpolicy/checkpolicy.h"
+        POLICY_DEFINE="external/checkpolicy/policy_define.c"
+
+        # 1. 将 checkpolicy.h 中的 "int te_assertions;" 改为 "extern int te_assertions;"
+        if grep -q "^int te_assertions;" "$CHECKPOLICY_H"; then
+          sed -i 's/^int te_assertions;/extern int te_assertions;/' "$CHECKPOLICY_H"
+          echo "✅ Fixed checkpolicy.h: changed 'int' to 'extern'"
+        else
+          echo "⚠️  checkpolicy.h does not contain 'int te_assertions;' (maybe already fixed)"
+        fi
+
+        # 2. 在 policy_define.c 中添加定义（如果尚未存在）
+        if ! grep -q "^int te_assertions =" "$POLICY_DEFINE"; then
+          echo "int te_assertions = 0;" >> "$POLICY_DEFINE"
+          echo "✅ Added te_assertions definition to policy_define.c"
+        else
+          echo "⚠️  te_assertions already defined in policy_define.c"
+        fi
+
+        echo "🎉 checkpolicy source fix applied"
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+    # ====================================================
+
     - name: Clone device tree
       run: |
         git clone ${{ github.event.inputs.DEVICE_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
