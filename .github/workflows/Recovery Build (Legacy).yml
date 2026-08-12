@@ -162,15 +162,10 @@ jobs:
         git clone ${{ github.event.inputs.DEVICE_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ========== 关键修复：创建符号链接解决路径大小写不一致 ==========
+    # ========== 创建符号链接解决路径大小写不一致 ==========
     - name: Create symlink for device path (fix case mismatch)
       run: |
-        # 根据错误信息，产品配置期望路径为 device/gionee/GiONEE_BFL7506A
-        # 而实际克隆路径是 device/GiONEE/BFL7506A（由 DEVICE_PATH 决定）
-        # 创建符号链接让两者都能访问
         mkdir -p device/gionee
-        # 注意：这里假设 DEVICE_PATH 是 device/GiONEE/BFL7506A，实际路径由输入决定
-        # 但我们使用相对路径创建链接
         TARGET_PATH="${{ github.event.inputs.DEVICE_PATH }}"
         LINK_PATH="device/gionee/GiONEE_BFL7506A"
         if [ ! -e "$LINK_PATH" ]; then
@@ -180,7 +175,6 @@ jobs:
           echo "Symlink already exists"
         fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-    # =============================================================
 
     - name: Remove incompatible Android.bp
       run: |
@@ -241,6 +235,29 @@ jobs:
 
         echo "🎉 BoardConfig.mk overridden with aggressive optimizations"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    # ========== 新增：修复 TARGET_DEVICE 和 PRODUCT_DEVICE ==========
+    - name: Fix TARGET_DEVICE and PRODUCT_DEVICE
+      run: |
+        DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
+        # 设置 TARGET_DEVICE
+        sed -i '/^TARGET_DEVICE/d' "$DEVICE_DIR/BoardConfig.mk"
+        echo "TARGET_DEVICE := GiONEE_BFL7506A" >> "$DEVICE_DIR/BoardConfig.mk"
+        # 设置 PRODUCT_DEVICE 在 omni_GiONEE_BFL7506A.mk
+        OMNI_MK="$DEVICE_DIR/omni_GiONEE_BFL7506A.mk"
+        if [ -f "$OMNI_MK" ]; then
+          sed -i '/^PRODUCT_DEVICE/d' "$OMNI_MK"
+          echo "PRODUCT_DEVICE := GiONEE_BFL7506A" >> "$OMNI_MK"
+        fi
+        # 也修改 device.mk（如果存在）
+        DEVICE_MK="$DEVICE_DIR/device.mk"
+        if [ -f "$DEVICE_MK" ]; then
+          sed -i '/^PRODUCT_DEVICE/d' "$DEVICE_MK"
+          echo "PRODUCT_DEVICE := GiONEE_BFL7506A" >> "$DEVICE_MK"
+        fi
+        echo "✅ Fixed TARGET_DEVICE and PRODUCT_DEVICE to GiONEE_BFL7506A"
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+    # ================================================================
 
     # 清理 device.mk 中的引用（辅助）
     - name: Clean device.mk references
