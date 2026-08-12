@@ -123,10 +123,8 @@ jobs:
         CHECKPOLICY_H="external/checkpolicy/checkpolicy.h"
         POLICY_DEFINE="external/checkpolicy/policy_define.c"
 
-        # 1. 删除之前可能添加的错误定义（int 类型）
         sed -i '/^int te_assertions = 0;/d' "$POLICY_DEFINE"
 
-        # 2. 将 checkpolicy.h 中的 "te_assert_t *te_assertions;" 改为 extern 声明
         if grep -q "^te_assert_t \*te_assertions;" "$CHECKPOLICY_H"; then
           sed -i 's/^te_assert_t \*te_assertions;/extern te_assert_t *te_assertions;/' "$CHECKPOLICY_H"
           echo "✅ Fixed checkpolicy.h: added 'extern' to te_assertions declaration"
@@ -134,7 +132,6 @@ jobs:
           echo "⚠️  checkpolicy.h does not contain 'te_assert_t *te_assertions;' (maybe already fixed)"
         fi
 
-        # 3. 在 policy_define.c 中添加定义（如果尚未存在）
         if ! grep -q "^te_assert_t \*te_assertions =" "$POLICY_DEFINE"; then
           echo "te_assert_t *te_assertions = NULL;" >> "$POLICY_DEFINE"
           echo "✅ Added te_assertions definition to policy_define.c"
@@ -150,9 +147,7 @@ jobs:
       run: |
         MK="external/libselinux/Android.mk"
         if [ -f "$MK" ]; then
-          # 删除包含 LOCAL_WHOLE_STATIC_LIBRARIES 的行
           sed -i '/LOCAL_WHOLE_STATIC_LIBRARIES/d' "$MK"
-          # 添加 LOCAL_STATIC_LIBRARIES := libpcre（如果原来有则覆盖）
           sed -i '/LOCAL_STATIC_LIBRARIES/d' "$MK"
           echo "LOCAL_STATIC_LIBRARIES := libpcre" >> "$MK"
           echo "✅ Fixed libselinux Android.mk: changed WHOLE to STATIC for libpcre"
@@ -166,6 +161,26 @@ jobs:
       run: |
         git clone ${{ github.event.inputs.DEVICE_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    # ========== 关键修复：创建符号链接解决路径大小写不一致 ==========
+    - name: Create symlink for device path (fix case mismatch)
+      run: |
+        # 根据错误信息，产品配置期望路径为 device/gionee/GiONEE_BFL7506A
+        # 而实际克隆路径是 device/GiONEE/BFL7506A（由 DEVICE_PATH 决定）
+        # 创建符号链接让两者都能访问
+        mkdir -p device/gionee
+        # 注意：这里假设 DEVICE_PATH 是 device/GiONEE/BFL7506A，实际路径由输入决定
+        # 但我们使用相对路径创建链接
+        TARGET_PATH="${{ github.event.inputs.DEVICE_PATH }}"
+        LINK_PATH="device/gionee/GiONEE_BFL7506A"
+        if [ ! -e "$LINK_PATH" ]; then
+          ln -sf "../${TARGET_PATH#device/}" "$LINK_PATH"
+          echo "Created symlink $LINK_PATH -> $TARGET_PATH"
+        else
+          echo "Symlink already exists"
+        fi
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+    # =============================================================
 
     - name: Remove incompatible Android.bp
       run: |
@@ -193,11 +208,9 @@ jobs:
         fi
         echo "✅ Found BoardConfig.mk"
 
-        # 1. 强制使用 xz 压缩（比 gzip 压缩率更高）
         sed -i '/BOARD_RAMDISK_COMPRESSOR/d' "$BOARD_FILE"
         echo "BOARD_RAMDISK_COMPRESSOR := xz" >> "$BOARD_FILE"
 
-        # 2. 强制禁用所有可选的额外组件（逐一覆盖可能存在的 true）
         sed -i '/TW_INCLUDE_BASH/d' "$BOARD_FILE"
         echo "TW_INCLUDE_BASH := false" >> "$BOARD_FILE"
         sed -i '/TW_INCLUDE_NANO/d' "$BOARD_FILE"
@@ -215,11 +228,8 @@ jobs:
         sed -i '/TW_INCLUDE_OPENSSH/d' "$BOARD_FILE"
         echo "TW_INCLUDE_OPENSSH := false" >> "$BOARD_FILE"
 
-        # 3. 确保 MTP 没有被禁用
         sed -i '/TW_EXCLUDE_MTP/d' "$BOARD_FILE"
-        # 不添加 TW_EXCLUDE_MTP，默认保留
 
-        # 4. 设置默认语言和署名
         sed -i '/TW_EXTRA_LANGUAGES/d' "$BOARD_FILE"
         echo "TW_EXTRA_LANGUAGES := true" >> "$BOARD_FILE"
         sed -i '/TW_DEFAULT_LANGUAGE/d' "$BOARD_FILE"
@@ -227,8 +237,6 @@ jobs:
         sed -i '/TW_DEVICE_VERSION/d' "$BOARD_FILE"
         echo "TW_DEVICE_VERSION := Xxinn034" >> "$BOARD_FILE"
 
-        # 5. 【关键】显式设置分区大小为 20 MiB（如果设备实际支持，否则需要继续精简）
-        # 注释掉下面一行如果不想改分区大小，但建议先启用，看是否编译成功
         echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 20971520" >> "$BOARD_FILE"
 
         echo "🎉 BoardConfig.mk overridden with aggressive optimizations"
