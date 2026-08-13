@@ -23,12 +23,6 @@ on:
         description: '设备树在源码中的路径（如 device/厂商/代号）'
         required: true
         default: 'device/你的厂商/你的代号'
-      COMMON_TREE_URL:
-        description: '通用树仓库URL（没有则留空）'
-        required: false
-      COMMON_PATH:
-        description: '通用树路径（没有则留空）'
-        required: false
       DEVICE_NAME:
         description: '设备代号（将用于输出文件名）'
         required: true
@@ -87,8 +81,7 @@ jobs:
 
     - name: Setup SSH Keys
       if: ${{ startsWith(github.event.inputs.MANIFEST_URL, 'git@github.com') || 
-          startsWith(github.event.inputs.DEVICE_TREE_URL, 'git@github.com') ||
-          startsWith(github.event.inputs.COMMON_TREE_URL, 'git@github.com') }}
+          startsWith(github.event.inputs.DEVICE_TREE_URL, 'git@github.com') }}
       uses: webfactory/ssh-agent@v0.9.0
       with:
           ssh-private-key: |
@@ -124,35 +117,22 @@ jobs:
         POLICY_DEFINE="external/checkpolicy/policy_define.c"
 
         sed -i '/^int te_assertions = 0;/d' "$POLICY_DEFINE"
-
         if grep -q "^te_assert_t \*te_assertions;" "$CHECKPOLICY_H"; then
           sed -i 's/^te_assert_t \*te_assertions;/extern te_assert_t *te_assertions;/' "$CHECKPOLICY_H"
-          echo "✅ Fixed checkpolicy.h: added 'extern' to te_assertions declaration"
-        else
-          echo "⚠️  checkpolicy.h does not contain 'te_assert_t *te_assertions;' (maybe already fixed)"
         fi
-
         if ! grep -q "^te_assert_t \*te_assertions =" "$POLICY_DEFINE"; then
           echo "te_assert_t *te_assertions = NULL;" >> "$POLICY_DEFINE"
-          echo "✅ Added te_assertions definition to policy_define.c"
-        else
-          echo "⚠️  te_assertions already defined in policy_define.c"
         fi
-
-        echo "🎉 checkpolicy source fix applied"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ========== 修复 libselinux 静态库依赖 ==========
-    - name: Fix libselinux static libs (remove whole pcre)
+    # ========== 修复 libselinux ==========
+    - name: Fix libselinux static libs
       run: |
         MK="external/libselinux/Android.mk"
         if [ -f "$MK" ]; then
           sed -i '/LOCAL_WHOLE_STATIC_LIBRARIES/d' "$MK"
           sed -i '/LOCAL_STATIC_LIBRARIES/d' "$MK"
           echo "LOCAL_STATIC_LIBRARIES := libpcre" >> "$MK"
-          echo "✅ Fixed libselinux Android.mk: changed WHOLE to STATIC for libpcre"
-        else
-          echo "⚠️  libselinux Android.mk not found"
         fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
@@ -161,125 +141,99 @@ jobs:
         git clone ${{ github.event.inputs.DEVICE_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ========== 创建符号链接解决路径大小写不一致 ==========
-    - name: Create symlink for device path (fix case mismatch)
+    # ========== 创建符号链接 ==========
+    - name: Create symlink for device path
       run: |
         mkdir -p device/gionee
         TARGET_PATH="${{ github.event.inputs.DEVICE_PATH }}"
         LINK_PATH="device/gionee/GiONEE_BFL7506A"
         if [ ! -e "$LINK_PATH" ]; then
           ln -sf "../${TARGET_PATH#device/}" "$LINK_PATH"
-          echo "Created symlink $LINK_PATH -> $TARGET_PATH"
-        else
-          echo "Symlink already exists"
         fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Remove incompatible Android.bp
       run: |
         if [ -f ./${{ github.event.inputs.DEVICE_PATH }}/Android.bp ]; then
-          echo "Removing Android.bp (soong_namespace not supported)"
           rm ./${{ github.event.inputs.DEVICE_PATH }}/Android.bp
         fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    - name: Clone common tree
-      if: |
-        github.event.inputs.COMMON_TREE_URL != null
-        && github.event.inputs.COMMON_PATH != null
-      run: |
-        git clone ${{ github.event.inputs.COMMON_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.COMMON_PATH }}
-      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-
     # ========== 强制精简 BoardConfig ==========
-    - name: Force TWRP size optimizations (override BoardConfig)
+    - name: Force TWRP size optimizations
       run: |
         BOARD_FILE="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk"
         if [ ! -f "$BOARD_FILE" ]; then
           echo "❌ BoardConfig.mk not found! Exiting."
           exit 1
         fi
-        echo "✅ Found BoardConfig.mk"
-
         sed -i '/BOARD_RAMDISK_COMPRESSOR/d' "$BOARD_FILE"
         echo "BOARD_RAMDISK_COMPRESSOR := xz" >> "$BOARD_FILE"
-
-        sed -i '/TW_INCLUDE_BASH/d' "$BOARD_FILE"
-        echo "TW_INCLUDE_BASH := false" >> "$BOARD_FILE"
-        sed -i '/TW_INCLUDE_NANO/d' "$BOARD_FILE"
-        echo "TW_INCLUDE_NANO := false" >> "$BOARD_FILE"
-        sed -i '/TW_INCLUDE_PIGZ/d' "$BOARD_FILE"
-        echo "TW_INCLUDE_PIGZ := false" >> "$BOARD_FILE"
-        sed -i '/TW_INCLUDE_OPENAES/d' "$BOARD_FILE"
-        echo "TW_INCLUDE_OPENAES := false" >> "$BOARD_FILE"
-        sed -i '/TW_INCLUDE_TWRPAPP/d' "$BOARD_FILE"
-        echo "TW_INCLUDE_TWRPAPP := false" >> "$BOARD_FILE"
-        sed -i '/TW_INCLUDE_CRYPTO/d' "$BOARD_FILE"
-        echo "TW_INCLUDE_CRYPTO := false" >> "$BOARD_FILE"
-        sed -i '/TW_INCLUDE_BUSYBOX/d' "$BOARD_FILE"
-        echo "TW_INCLUDE_BUSYBOX := false" >> "$BOARD_FILE"
-        sed -i '/TW_INCLUDE_OPENSSH/d' "$BOARD_FILE"
-        echo "TW_INCLUDE_OPENSSH := false" >> "$BOARD_FILE"
-
+        for flag in TW_INCLUDE_BASH TW_INCLUDE_NANO TW_INCLUDE_PIGZ TW_INCLUDE_OPENAES TW_INCLUDE_TWRPAPP TW_INCLUDE_CRYPTO TW_INCLUDE_BUSYBOX TW_INCLUDE_OPENSSH; do
+          sed -i "/$flag/d" "$BOARD_FILE"
+          echo "$flag := false" >> "$BOARD_FILE"
+        done
         sed -i '/TW_EXCLUDE_MTP/d' "$BOARD_FILE"
-
         sed -i '/TW_EXTRA_LANGUAGES/d' "$BOARD_FILE"
         echo "TW_EXTRA_LANGUAGES := true" >> "$BOARD_FILE"
         sed -i '/TW_DEFAULT_LANGUAGE/d' "$BOARD_FILE"
         echo "TW_DEFAULT_LANGUAGE := zh_CN" >> "$BOARD_FILE"
         sed -i '/TW_DEVICE_VERSION/d' "$BOARD_FILE"
         echo "TW_DEVICE_VERSION := Xxinn034" >> "$BOARD_FILE"
-
         echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 20971520" >> "$BOARD_FILE"
-
-        echo "🎉 BoardConfig.mk overridden with aggressive optimizations"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ========== 【最终修复】强制重写产品配置文件 ==========
-    - name: Force correct product makefiles
+    # ========== 【终极修复】强制创建产品配置文件 ==========
+    - name: Force correct product makefiles (absolute path)
       run: |
-        DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
-        PRODUCT_NAME="${{ github.event.inputs.MAKEFILE_NAME }}"  # e.g. omni_GiONEE_BFL7506A
-        DEVICE_NAME="${{ github.event.inputs.DEVICE_NAME }}"    # e.g. BFL7506A
+        WORKSPACE="${{ steps.pwd.outputs.workspace-folder }}"
+        DEVICE_DIR="$WORKSPACE/${{ github.event.inputs.DEVICE_PATH }}"
+        PRODUCT_NAME="${{ github.event.inputs.MAKEFILE_NAME }}"
+        DEVICE_NAME="${{ github.event.inputs.DEVICE_NAME }}"
 
-        # 1. 创建 AndroidProducts.mk（如果不存在则覆盖）
+        echo "Creating product makefiles in $DEVICE_DIR"
+        # 1. 创建 AndroidProducts.mk，使用绝对路径或相对于 device 目录的路径
         cat > "$DEVICE_DIR/AndroidProducts.mk" <<EOF
-        PRODUCT_MAKEFILES := \$(LOCAL_DIR)/\$(PRODUCT_NAME).mk
+        PRODUCT_MAKEFILES := \\
+            $DEVICE_DIR/$PRODUCT_NAME.mk
         EOF
 
-        # 2. 创建 PRODUCT_NAME.mk（覆盖原有内容）
+        # 2. 创建 PRODUCT_NAME.mk
         cat > "$DEVICE_DIR/$PRODUCT_NAME.mk" <<EOF
-        # 继承 Omni 基础配置
         \$(call inherit-product, build/target/product/omni.mk)
-
-        # 设备信息
         PRODUCT_NAME := $PRODUCT_NAME
         PRODUCT_DEVICE := $DEVICE_NAME
         PRODUCT_BRAND := GiONEE
         PRODUCT_MODEL := BFL7506A
         PRODUCT_MANUFACTURER := GiONEE
-
-        # Recovery 相关
         PRODUCT_PACKAGES += recovery twrp
-
-        # 其他必需配置
         \$(call inherit-product, vendor/omni/config/gsm.mk)
         EOF
 
-        # 3. 在 BoardConfig.mk 中强制设置 TARGET_DEVICE
+        # 3. 在 BoardConfig.mk 设置 TARGET_DEVICE
         sed -i '/^TARGET_DEVICE/d' "$DEVICE_DIR/BoardConfig.mk"
         echo "TARGET_DEVICE := $DEVICE_NAME" >> "$DEVICE_DIR/BoardConfig.mk"
 
-        # 4. 更新 vendorsetup.sh，添加 lunch 组合
+        # 4. 更新 vendorsetup.sh
         VENDOR_SETUP="$DEVICE_DIR/vendorsetup.sh"
         if [ -f "$VENDOR_SETUP" ]; then
           sed -i "/add_lunch_combo/d" "$VENDOR_SETUP"
         fi
         echo "add_lunch_combo $PRODUCT_NAME-eng" >> "$VENDOR_SETUP"
 
-        echo "✅ Forced product makefiles for $PRODUCT_NAME"
+        # 5. 同时复制一份到符号链接路径，确保被找到
+        mkdir -p "$WORKSPACE/device/gionee/GiONEE_BFL7506A"
+        cp "$DEVICE_DIR/AndroidProducts.mk" "$WORKSPACE/device/gionee/GiONEE_BFL7506A/"
+        cp "$DEVICE_DIR/$PRODUCT_NAME.mk" "$WORKSPACE/device/gionee/GiONEE_BFL7506A/"
+        cp "$DEVICE_DIR/BoardConfig.mk" "$WORKSPACE/device/gionee/GiONEE_BFL7506A/"
+        cp "$DEVICE_DIR/vendorsetup.sh" "$WORKSPACE/device/gionee/GiONEE_BFL7506A/"
+
+        echo "✅ Product files created successfully"
+        # 列出文件供调试
+        ls -l "$DEVICE_DIR"
+        ls -l "$WORKSPACE/device/gionee/GiONEE_BFL7506A"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-    # ==========================================================
+    # ========================================================
 
     # 清理 device.mk 中的引用（辅助）
     - name: Clean device.mk references
@@ -287,7 +241,6 @@ jobs:
         DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
         for mkfile in device.mk omni.mk; do
           if [ -f "$DEVICE_DIR/$mkfile" ]; then
-            echo "Cleaning $mkfile"
             sed -i '/busybox/d' "$DEVICE_DIR/$mkfile"
             sed -i '/bash/d' "$DEVICE_DIR/$mkfile"
             sed -i '/nano/d' "$DEVICE_DIR/$mkfile"
@@ -300,21 +253,16 @@ jobs:
           fi
         done
 
-    # 语言精简（保留 fonts/ 和 languages/ 目录）
+    # 语言精简
     - name: Prune non-Chinese languages
       run: |
         LANG_DIR="${{ steps.pwd.outputs.workspace-folder }}/bootable/recovery/gui/theme/extra-languages/"
         if [ -d "$LANG_DIR" ]; then
-          echo "Deleting non-Chinese language folders (keeping fonts/ and languages/)..."
           cd "$LANG_DIR"
           for lang in $(ls -d */ 2>/dev/null | grep -v -E '^(fonts|languages|zh_CN)/'); do
-            echo "Removing $lang"
             rm -rf "$lang"
           done
           cd - >/dev/null
-          echo "✅ Language folders pruned"
-        else
-          echo "⚠️ extra-languages directory not found"
         fi
 
     - name: Set Swap Space
@@ -329,7 +277,6 @@ jobs:
         python2 get-pip.py
         sudo rm -rf /usr/bin/python
         sudo ln -s /usr/bin/python2 /usr/bin/python
-      continue-on-error: false
 
     - name: Building recovery
       run: |
