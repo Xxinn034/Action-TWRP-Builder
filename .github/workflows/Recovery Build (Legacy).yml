@@ -115,7 +115,6 @@ jobs:
         set -e
         CHECKPOLICY_H="external/checkpolicy/checkpolicy.h"
         POLICY_DEFINE="external/checkpolicy/policy_define.c"
-
         sed -i '/^int te_assertions = 0;/d' "$POLICY_DEFINE"
         if grep -q "^te_assert_t \*te_assertions;" "$CHECKPOLICY_H"; then
           sed -i 's/^te_assert_t \*te_assertions;/extern te_assert_t *te_assertions;/' "$CHECKPOLICY_H"
@@ -141,8 +140,8 @@ jobs:
         git clone ${{ github.event.inputs.DEVICE_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ========== 创建符号链接 ==========
-    - name: Create symlink for device path
+    # ========== 创建符号链接（仅用于兼容，不再复制文件） ==========
+    - name: Create symlink for compatibility
       run: |
         mkdir -p device/gionee
         TARGET_PATH="${{ github.event.inputs.DEVICE_PATH }}"
@@ -183,8 +182,8 @@ jobs:
         echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 20971520" >> "$BOARD_FILE"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ========== 【终极修复】强制创建产品配置文件 ==========
-    - name: Force correct product makefiles (absolute path)
+    # ========== 【最终修复】强制创建产品配置文件（使用设备代号作为 TARGET_DEVICE） ==========
+    - name: Force correct product makefiles
       run: |
         WORKSPACE="${{ steps.pwd.outputs.workspace-folder }}"
         DEVICE_DIR="$WORKSPACE/${{ github.event.inputs.DEVICE_PATH }}"
@@ -192,7 +191,7 @@ jobs:
         DEVICE_NAME="${{ github.event.inputs.DEVICE_NAME }}"
 
         echo "Creating product makefiles in $DEVICE_DIR"
-        # 1. 创建 AndroidProducts.mk，使用绝对路径或相对于 device 目录的路径
+        # 1. 创建 AndroidProducts.mk
         cat > "$DEVICE_DIR/AndroidProducts.mk" <<EOF
         PRODUCT_MAKEFILES := \\
             $DEVICE_DIR/$PRODUCT_NAME.mk
@@ -210,7 +209,7 @@ jobs:
         \$(call inherit-product, vendor/omni/config/gsm.mk)
         EOF
 
-        # 3. 在 BoardConfig.mk 设置 TARGET_DEVICE
+        # 3. 在 BoardConfig.mk 设置 TARGET_DEVICE（使用设备代号，而非带厂商前缀）
         sed -i '/^TARGET_DEVICE/d' "$DEVICE_DIR/BoardConfig.mk"
         echo "TARGET_DEVICE := $DEVICE_NAME" >> "$DEVICE_DIR/BoardConfig.mk"
 
@@ -221,19 +220,11 @@ jobs:
         fi
         echo "add_lunch_combo $PRODUCT_NAME-eng" >> "$VENDOR_SETUP"
 
-        # 5. 同时复制一份到符号链接路径，确保被找到
-        mkdir -p "$WORKSPACE/device/gionee/GiONEE_BFL7506A"
-        cp "$DEVICE_DIR/AndroidProducts.mk" "$WORKSPACE/device/gionee/GiONEE_BFL7506A/"
-        cp "$DEVICE_DIR/$PRODUCT_NAME.mk" "$WORKSPACE/device/gionee/GiONEE_BFL7506A/"
-        cp "$DEVICE_DIR/BoardConfig.mk" "$WORKSPACE/device/gionee/GiONEE_BFL7506A/"
-        cp "$DEVICE_DIR/vendorsetup.sh" "$WORKSPACE/device/gionee/GiONEE_BFL7506A/"
-
         echo "✅ Product files created successfully"
         # 列出文件供调试
-        ls -l "$DEVICE_DIR"
-        ls -l "$WORKSPACE/device/gionee/GiONEE_BFL7506A"
+        ls -l "$DEVICE_DIR" | head -20
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-    # ========================================================
+    # ==============================================================
 
     # 清理 device.mk 中的引用（辅助）
     - name: Clean device.mk references
