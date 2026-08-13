@@ -155,7 +155,6 @@ jobs:
           echo "⚠️  libselinux Android.mk not found"
         fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-    # ====================================================
 
     - name: Clone device tree
       run: |
@@ -236,28 +235,51 @@ jobs:
         echo "🎉 BoardConfig.mk overridden with aggressive optimizations"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ========== 新增：修复 TARGET_DEVICE 和 PRODUCT_DEVICE ==========
-    - name: Fix TARGET_DEVICE and PRODUCT_DEVICE
+    # ========== 【最终修复】强制重写产品配置文件 ==========
+    - name: Force correct product makefiles
       run: |
         DEVICE_DIR="${{ steps.pwd.outputs.workspace-folder }}/${{ github.event.inputs.DEVICE_PATH }}"
-        # 设置 TARGET_DEVICE
+        PRODUCT_NAME="${{ github.event.inputs.MAKEFILE_NAME }}"  # e.g. omni_GiONEE_BFL7506A
+        DEVICE_NAME="${{ github.event.inputs.DEVICE_NAME }}"    # e.g. BFL7506A
+
+        # 1. 创建 AndroidProducts.mk（如果不存在则覆盖）
+        cat > "$DEVICE_DIR/AndroidProducts.mk" <<EOF
+        PRODUCT_MAKEFILES := \$(LOCAL_DIR)/\$(PRODUCT_NAME).mk
+        EOF
+
+        # 2. 创建 PRODUCT_NAME.mk（覆盖原有内容）
+        cat > "$DEVICE_DIR/$PRODUCT_NAME.mk" <<EOF
+        # 继承 Omni 基础配置
+        \$(call inherit-product, build/target/product/omni.mk)
+
+        # 设备信息
+        PRODUCT_NAME := $PRODUCT_NAME
+        PRODUCT_DEVICE := $DEVICE_NAME
+        PRODUCT_BRAND := GiONEE
+        PRODUCT_MODEL := BFL7506A
+        PRODUCT_MANUFACTURER := GiONEE
+
+        # Recovery 相关
+        PRODUCT_PACKAGES += recovery twrp
+
+        # 其他必需配置
+        \$(call inherit-product, vendor/omni/config/gsm.mk)
+        EOF
+
+        # 3. 在 BoardConfig.mk 中强制设置 TARGET_DEVICE
         sed -i '/^TARGET_DEVICE/d' "$DEVICE_DIR/BoardConfig.mk"
-        echo "TARGET_DEVICE := GiONEE_BFL7506A" >> "$DEVICE_DIR/BoardConfig.mk"
-        # 设置 PRODUCT_DEVICE 在 omni_GiONEE_BFL7506A.mk
-        OMNI_MK="$DEVICE_DIR/omni_GiONEE_BFL7506A.mk"
-        if [ -f "$OMNI_MK" ]; then
-          sed -i '/^PRODUCT_DEVICE/d' "$OMNI_MK"
-          echo "PRODUCT_DEVICE := GiONEE_BFL7506A" >> "$OMNI_MK"
+        echo "TARGET_DEVICE := $DEVICE_NAME" >> "$DEVICE_DIR/BoardConfig.mk"
+
+        # 4. 更新 vendorsetup.sh，添加 lunch 组合
+        VENDOR_SETUP="$DEVICE_DIR/vendorsetup.sh"
+        if [ -f "$VENDOR_SETUP" ]; then
+          sed -i "/add_lunch_combo/d" "$VENDOR_SETUP"
         fi
-        # 也修改 device.mk（如果存在）
-        DEVICE_MK="$DEVICE_DIR/device.mk"
-        if [ -f "$DEVICE_MK" ]; then
-          sed -i '/^PRODUCT_DEVICE/d' "$DEVICE_MK"
-          echo "PRODUCT_DEVICE := GiONEE_BFL7506A" >> "$DEVICE_MK"
-        fi
-        echo "✅ Fixed TARGET_DEVICE and PRODUCT_DEVICE to GiONEE_BFL7506A"
+        echo "add_lunch_combo $PRODUCT_NAME-eng" >> "$VENDOR_SETUP"
+
+        echo "✅ Forced product makefiles for $PRODUCT_NAME"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-    # ================================================================
+    # ==========================================================
 
     # 清理 device.mk 中的引用（辅助）
     - name: Clean device.mk references
