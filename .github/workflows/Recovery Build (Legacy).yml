@@ -182,7 +182,7 @@ jobs:
         echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 20971520" >> "$BOARD_FILE"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    # ========== 【最终修复】强制创建产品配置文件（使用设备代号作为 TARGET_DEVICE） ==========
+    # ========== 【最终修复】强制创建产品配置文件（无复制） ==========
     - name: Force correct product makefiles
       run: |
         WORKSPACE="${{ steps.pwd.outputs.workspace-folder }}"
@@ -191,10 +191,10 @@ jobs:
         DEVICE_NAME="${{ github.event.inputs.DEVICE_NAME }}"
 
         echo "Creating product makefiles in $DEVICE_DIR"
-        # 1. 创建 AndroidProducts.mk
+        # 1. 创建 AndroidProducts.mk，使用 $(LOCAL_DIR) 相对路径
         cat > "$DEVICE_DIR/AndroidProducts.mk" <<EOF
         PRODUCT_MAKEFILES := \\
-            $DEVICE_DIR/$PRODUCT_NAME.mk
+            \$(LOCAL_DIR)/$PRODUCT_NAME.mk
         EOF
 
         # 2. 创建 PRODUCT_NAME.mk
@@ -209,7 +209,7 @@ jobs:
         \$(call inherit-product, vendor/omni/config/gsm.mk)
         EOF
 
-        # 3. 在 BoardConfig.mk 设置 TARGET_DEVICE（使用设备代号，而非带厂商前缀）
+        # 3. 在 BoardConfig.mk 设置 TARGET_DEVICE（使用设备代号）
         sed -i '/^TARGET_DEVICE/d' "$DEVICE_DIR/BoardConfig.mk"
         echo "TARGET_DEVICE := $DEVICE_NAME" >> "$DEVICE_DIR/BoardConfig.mk"
 
@@ -222,7 +222,7 @@ jobs:
 
         echo "✅ Product files created successfully"
         # 列出文件供调试
-        ls -l "$DEVICE_DIR" | head -20
+        ls -l "$DEVICE_DIR"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
     # ==============================================================
 
